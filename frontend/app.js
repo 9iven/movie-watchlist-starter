@@ -6,8 +6,12 @@
 // ==========================================
 // 1. STATE MANAGEMENT
 // ==========================================
+const isRemoteHost = typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+const savedApiUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('filmlog_api_url') : null;
+const defaultApiUrl = isRemoteHost ? `${window.location.origin}/api` : 'http://localhost:8000/api';
+
 const state = {
-  apiBaseUrl: localStorage.getItem('filmlog_api_url') || 'http://localhost:8000/api',
+  apiBaseUrl: (savedApiUrl && (!isRemoteHost || !savedApiUrl.includes('localhost'))) ? savedApiUrl : defaultApiUrl,
   token: localStorage.getItem('filmlog_token') || null,
   user: JSON.parse(localStorage.getItem('filmlog_user') || 'null'),
   currentTab: 'discover',
