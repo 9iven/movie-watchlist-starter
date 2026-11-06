@@ -3,3 +3,17 @@ Thumbs.db
 *.log
 .env
 .env.local
+
+# Python & Virtual Environments
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# SQLite database file (generated at runtime by seeder)
+filmlog.db
+.coverage
+start.bat
