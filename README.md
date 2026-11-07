@@ -1,85 +1,141 @@
-# FilmLog — GDGoC Backend Recruitment Task Starter Pack
-
-Selamat datang di repositori penugasan backend **FilmLog (Movie Watchlist & Review Platform)**. Repositori ini menyediakan:
-1. **Initial Seed Database** (`data/movies.json` dan `data/seed.sql`) berisi 20 film kurasi awal dengan atribut lengkap.
-2. **Frontend Companion** (`frontend/`) bertema Letterboxd yang siap pakai untuk menguji endpoint backend Anda secara visual dan interaktif.
-
----
-
-## 🎯 Objektif Penugasan
-Rancang dan bangun layanan **RESTful API** untuk aplikasi pelacak film (*movie watchlist*) yang mendukung alur autentikasi, kurasi film, pencatatan tontonan dan ulasan, serta integrasi **Google Gemini LLM** untuk rekomendasi film berbasis data lokal.
-
-Bebas menggunakan bahasa pemrograman dan framework apa pun (Node.js/Express/NestJS, Go/Gin/Fiber, Python/FastAPI/Django, PHP/Laravel, Java/Spring Boot, dll.) serta database relasional (PostgreSQL, MySQL, SQLite) atau NoSQL.
+# FilmLog — Movie Watchlist & Review API
+> Layanan backend RESTful API untuk platform kurasi film personal, pencatatan jurnal ulasan tontonan, dan rekomendasi cerdas berbasis Google Gemini AI.
+> 
+> **Penugasan Rekrutmen Hacker Backend Track — GDGoC Universitas Gadjah Mada 2026/2027**  
+> **Kandidat:** Given Gerald Chandra
 
 ---
 
-## 📁 Struktur Repositori Starter
+## 🌐 Tautan Live Deployment & Dokumentasi
 
-```text
-movie-watchlist-starter/
-├── data/
-│   ├── movies.json     # Data 20 film awal (format JSON) untuk database seeder
-│   └── seed.sql        # Skrip SQL INSERT kompatibel dengan PostgreSQL & MySQL
-├── frontend/
-│   ├── index.html      # Frontend Letterboxd-style SPA (Zero-build Tailwind)
-│   ├── app.js          # Client logic & API caller
-│   └── README.md       # Panduan menjalankan frontend
-└── README.md           # Panduan penugasan & spesifikasi API
+* **Live Deployment URL (Vercel):** [https://movie-watchlist-starter.vercel.app](https://movie-watchlist-starter.vercel.app)
+* **Interactive API Documentation (Swagger UI):** [https://movie-watchlist-starter.vercel.app/docs](https://movie-watchlist-starter.vercel.app/docs)
+* **Alternative API Documentation (ReDoc):** [https://movie-watchlist-starter.vercel.app/redoc](https://movie-watchlist-starter.vercel.app/redoc)
+
+---
+
+## 🛠️ Tech Stack & Arsitektur Sistem
+
+- **Bahasa & Runtime:** Python 3.10+
+- **Framework Web:** FastAPI (ASGI via Uvicorn)
+- **Database & ORM:** SQLite, SQLAlchemy 2.0
+- **Skema & Validasi Data:** Pydantic v2
+- **Keamanan & Autentikasi:** PyJWT (HS256) & enkripsi password langsung menggunakan library `bcrypt`
+- **Kecerdasan Buatan:** Google GenAI SDK (`google-genai`), model `gemini-3.5-flash-lite` dengan *Closed-Domain Grounding*
+- **Pengujian Otomatis:** Pytest (19 automated test cases, 100% pass rate)
+
+---
+
+## 🚀 Fitur Unggulan & Solusi Ekstra Terhadap Masalah Teknis
+
+Berikut adalah rekayasa teknis dan solusi defensif ekstra yang diimplementasikan untuk menangani berbagai tantangan dalam pengembangan backend:
+
+| Tantangan / Masalah Teknis | Risiko / Dampak | Solusi Ekstra yang Diterapkan | Lokasi Kode |
+| :--- | :--- | :--- | :--- |
+| **1. Serverless Cold-Start & Ephemeral DB** | Pada platform serverless seperti Vercel, container bisa mati saat tidak ada request. Token JWT valid milik user yang mendaftar di sesi sebelumnya bisa ditolak dengan HTTP 401 saat menyentuh container baru karena database SQLite di `/tmp` belum mencatat ID tersebut. | **Graceful Serverless User Recovery:** Pada `get_current_user`, jika tanda tangan digital JWT terbukti sah menggunakan `JWT_SECRET`, sistem secara otomatis memulihkan baris `User` ke dalam database SQLite container baru tanpa memaksa user logout/login ulang secara kasar. | `app/dependencies.py` |
+| **2. Chrome Private Network Access (PNA)** | Frontend web yang di-deploy ke domain publik internet (HTTPS Vercel) secara default memicu peringatan izin keamanan browser jika memanggil `http://localhost:8000/api`. | **Adaptive Host Resolution:** Menambahkan deteksi cerdas berbasis origin (`isRemoteHost`) pada `frontend/app.js` sehingga otomatis menggunakan `/api` saat diakses via internet dan kembali ke `http://localhost:8000/api` saat pengujian lokal. | `frontend/app.js` |
+| **3. Halusinasi Rekomendasi LLM** | Model AI generatif sering merekomendasikan film populer di luar 20 film katalog lokal bawaan panitia (*out-of-domain hallucination*). | **Strict Closed-Domain Grounding & Structured Outputs:** Seluruh metadata 20 film disuntikkan ke dalam *system instruction* model `gemini-3.5-flash-lite`. Output dikunci menggunakan `response_schema` JSON terstruktur (`movie_id` dan `reasoning`) via SDK resmi `google-genai`. | `app/ai_service.py` |
+| **4. Failover saat Kuota / Jaringan AI Gangguan** | Kegagalan koneksi atau habisnya kuota Google Gemini API bisa merusak pengalaman pengguna (*service disruption*). | **Transparent Hybrid Fallback:** Jika pemanggilan Gemini gagal, sistem otomatis beralih ke pencocokan kata kunci lokal berbasis genre dan sinopsis dengan menyertakan penanda transparan `source: "gemini"` vs `source: "local_fallback"`. | `app/ai_service.py` |
+| **5. Duplikasi Data & Race Condition** | Validasi duplikasi yang hanya dilakukan di level router rawan ditembus saat terjadi *concurrent requests*. | **Composite Unique Constraint:** Menetapkan aturan unik ganda `UniqueConstraint("user_id", "movie_id")` langsung pada tabel `watchlists` di level database SQLAlchemy, serta mengembalikan status HTTP 409 Conflict. | `app/models.py`<br>`app/routers/watchlist.py` |
+| **6. Input Kotor & Rating Out-of-Bounds** | Pengguna mengirimkan rating angka negatif, nol, di atas 5, atau ulasan kosong. | **Defensive Bounds Checking:** Validasi Pydantic v2 `Field(..., ge=1.0, le=5.0)` dan pembersihan teks spasi kosong (*whitespace sanitization*). | `app/schemas.py` |
+| **7. Dual-Mode Root Routing** | Frontend SPA dan API dokumentasi perlu disajikan secara efisien dari satu server backend. | **Content Negotiation Root Route:** Rute root `/` mendeteksi *header* `Accept`: jika diminta oleh peramban web disajikan antarmuka SPA Letterboxd, sedangkan jika dipanggil oleh klien API/cURL mengembalikan status JSON dan tautan dokumentasi. | `main.py` |
+
+---
+
+## 🗄️ Rancangan Database (Entity-Relationship)
+
+Sistem menggunakan 4 tabel relasional yang saling terhubung:
+
+1. **`users`**: Menyimpan kredensial pengguna (`id`, `username`, `email`, `password_hash`, `created_at`).
+2. **`movies`**: Menyimpan katalog 20 film kurasi awal (`id`, `title`, `year`, `director`, `genres`, `rating`, `duration`, `synopsis`, `poster_url`, `cast_members`).
+3. **`watchlists`**: Menyimpan relasi tontonan pengguna terhadap film (`id`, `user_id`, `movie_id`, `added_at`). Dijaga oleh `UniqueConstraint("user_id", "movie_id")` dan foreign keys dengan aturan `ON DELETE CASCADE`.
+4. **`reviews`**: Menyimpan jurnal ulasan dan rating pengguna (`id`, `user_id`, `movie_id`, `rating`, `review`, `created_at`).
+
+---
+
+## 💻 Panduan Menjalankan Secara Lokal (Setup Guide)
+
+### 1. Prasyarat
+- Python 3.10 atau versi lebih baru
+- Git
+- Virtual environment (`venv`)
+
+### 2. Instalasi & Konfigurasi
+Clone repositori dan masuk ke direktori proyek:
+```bash
+git clone https://github.com/9iven/movie-watchlist-starter.git
+cd movie-watchlist-starter
 ```
 
----
+Buat dan aktifkan virtual environment:
+```bash
+# Windows
+python -m venv venv
+.\venv\Scripts\activate
 
-## 📑 Spesifikasi Kontrak API (API Contract)
+# macOS / Linux
+python3 -m venv venv
+source venv/bin/activate
+```
 
-Agar sistem dapat terhubung secara lancar dengan frontend companion yang disediakan, pastikan API Anda mematuhi spesifikasi antarmuka (API Contract) berikut:
+Pasang seluruh dependency yang dibutuhkan:
+```bash
+pip install -r requirements.txt
+```
 
-### 1. Autentikasi
-* `POST /api/auth/register`
-  * **Body:** `{ "username": "string", "email": "string", "password": "string" }`
-  * **Response:** Status `201 Created`
-* `POST /api/auth/login`
-  * **Body:** `{ "email": "string", "password": "string" }`
-  * **Response:** Status `200 OK`, JSON berisi `{ "token": "JWT_STRING", "user": { ... } }`
+Buat berkas konfigurasi `.env` pada root direktori:
+```env
+DATABASE_URL=sqlite:///./filmlog.db
+JWT_SECRET=super_secret_filmlog_jwt_key_gdgoc_2026
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=1440
+GEMINI_API_KEY=your_google_ai_studio_api_key_here
+```
 
-### 2. Movies
-* `GET /api/movies`
-  * **Query Params (Opsional):** `?genre=Sci-Fi&search=Inception`
-  * **Response:** Status `200 OK`, array daftar film dari database.
-* `GET /api/movies/:id`
-  * **Response:** Status `200 OK`, detail lengkap satu film.
+### 3. Menjalankan Aplikasi
+Jalankan server pengembangan menggunakan Uvicorn:
+```bash
+uvicorn main:app --reload --port 8000
+```
+*(Atau di Windows, kamu cukup menjalankan skrip batch: `.\start.bat`)*
 
-### 3. Watchlist (Protected - Membutuhkan `Authorization: Bearer <token>`)
-* `GET /api/watchlist`
-  * **Response:** Status `200 OK`, daftar film di watchlist user yang sedang login.
-* `POST /api/watchlist`
-  * **Body:** `{ "movieId": 1 }`
-  * **Response:** Status `201 Created`
-* `DELETE /api/watchlist/:movieId`
-  * **Response:** Status `200 OK` (atau `204 No Content`)
+Saat aplikasi pertama kali berjalan, sistem otomatis membuat tabel database dan mengimpor 20 data film awal dari `data/movies.json` via `app/seeder.py`.
 
-### 4. Watched & Review (Protected - Membutuhkan `Authorization: Bearer <token>`)
-* `GET /api/watched`
-  * **Response:** Status `200 OK`, riwayat film yang sudah ditonton oleh user beserta ulasan dan ratingnya.
-* `POST /api/watched`
-  * **Body:** `{ "movieId": 1, "rating": 5, "review": "Filmnya luar biasa..." }`
-  * **Response:** Status `201 Created`.
-
-### 5. AI Recommendation (Gemini API Integration ⭐)
-* `POST /api/movies/recommend`
-  * **Body:** `{ "prompt": "Saya mau film misteri dengan alur lambat dan atmosfer mendalam" }`
-  * **Aturan Khusus:** Film yang direkomendasikan **harus berasal dari 20 film di database awal**.
-  * **Response:** Status `200 OK` dengan JSON terstruktur:
-    ```json
-    {
-      "movie_id": 14,
-      "reasoning": "Memento sangat cocok dengan preferensi misteri Anda karena..."
-    }
-    ```
+Akses melalui peramban:
+- **Web Companion:** `http://localhost:8000/`
+- **Swagger UI Docs:** `http://localhost:8000/docs`
 
 ---
 
-## 💡 Prinsip Backend yang Dinilai
-1. **Database Modeling:** Relasi yang rapi antar tabel (`users`, `movies`, `watchlists`, `reviews`).
-2. **Access Control & Security:** Password di-hash (bcrypt/argon2), rute privat terlindungi token JWT, user tidak dapat memodifikasi data user lain.
-3. **Data Integrity & Robustness:** Validasi input request, penanganan error yang baik, dan penggunaan status code HTTP yang semantik.
-4. **Structured LLM Prompting:** Kemampuan mengarahkan Gemini untuk memilih dari subset data lokal dan mengembalikan JSON terstruktur.
+## 🧪 Pengujian Otomatis (Automated Testing)
+
+Proyek ini dilengkapi dengan 19 skenario pengujian komprehensif menggunakan Pytest yang mencakup pengujian auth, duplikasi, pembatasan rating, dan grounding Gemini:
+
+```bash
+pytest -v
+```
+
+Hasil pengujian:
+```text
+test_main.py::test_root_endpoint PASSED                                  [  5%]
+test_main.py::test_health_endpoint PASSED                                [ 10%]
+test_main.py::test_get_all_movies PASSED                                 [ 15%]
+test_main.py::test_filter_movies_by_genre PASSED                         [ 21%]
+test_main.py::test_search_movies PASSED                                  [ 26%]
+test_main.py::test_get_movie_detail_success PASSED                       [ 31%]
+test_main.py::test_get_movie_detail_not_found PASSED                     [ 36%]
+test_main.py::test_auth_register_and_duplicate PASSED                    [ 42%]
+test_main.py::test_auth_login_success PASSED                             [ 47%]
+test_main.py::test_auth_login_invalid_password PASSED                    [ 52%]
+test_main.py::test_watchlist_requires_auth PASSED                        [ 57%]
+test_main.py::test_watchlist_add_and_duplicate PASSED                    [ 63%]
+test_main.py::test_watchlist_get_list PASSED                             [ 68%]
+test_main.py::test_watchlist_add_invalid_movie PASSED                    [ 73%]
+test_main.py::test_watchlist_remove PASSED                               [ 78%]
+test_main.py::test_watched_requires_auth PASSED                          [ 84%]
+test_main.py::test_log_watched_and_review PASSED                         [ 89%]
+test_main.py::test_log_watched_invalid_rating PASSED                     [ 94%]
+test_main.py::test_movie_recommendation_grounded PASSED                  [100%]
+
+============================= 19 passed in ~6s =============================
+```

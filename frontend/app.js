@@ -411,7 +411,7 @@ async function openMovieDetail(movieId) {
             <span>${isWatchlisted ? 'Remove from Watchlist' : 'Add to Watchlist'}</span>
           </button>
 
-          <button onclick="closeMovieDetailModal(); openWatchedModal(${movie.id})" class="py-2.5 px-4 rounded-xl font-bold text-xs bg-brand-surfaceHover hover:bg-amber-400 hover:text-black border border-brand-border text-white flex items-center justify-center gap-2 transition">
+          <button onclick="openWatchedModal(${movie.id})" class="py-2.5 px-4 rounded-xl font-bold text-xs bg-brand-surfaceHover hover:bg-amber-400 hover:text-black border border-brand-border text-white flex items-center justify-center gap-2 transition">
             <i data-lucide="star" class="w-4 h-4"></i>
             <span>Log Review</span>
           </button>
@@ -630,6 +630,12 @@ function setRatingValue(val) {
 
 async function handleWatchedSubmit(event, movieId) {
   event.preventDefault();
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Menyimpan...';
+  }
+
   const rating = parseFloat(document.getElementById('watched-rating-input').value);
   const review = document.getElementById('watched-review-input').value.trim();
 
@@ -646,11 +652,32 @@ async function handleWatchedSubmit(event, movieId) {
       })
     });
 
+    // Auto-remove from watchlist if it was in watchlist
+    if (typeof isMovieInWatchlist === 'function' && isMovieInWatchlist(movieId)) {
+      try {
+        await apiFetch(`/watchlist/${movieId}`, { method: 'DELETE' });
+        state.watchlist = state.watchlist.filter(item => {
+          const id = item.movie_id || item.movieId || item.id || item;
+          return String(id) !== String(movieId);
+        });
+      } catch (e) {
+        // Ignore if already deleted
+      }
+    }
+
     showToast('Catatan film berhasil disimpan! ⭐', 'success');
     closeMovieDetailModal();
     loadWatchedList();
+    loadWatchlist();
+    applyMovieFilters();
   } catch (err) {
     showToast(err.message, 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Simpan Catatan';
+      if (window.lucide) lucide.createIcons();
+    }
   }
 }
 
